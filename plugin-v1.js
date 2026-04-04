@@ -38,26 +38,41 @@ function getTryNowButton(){
 }
 
 function initPluginTab(){
+  // Do not pass noopener/noreferrer: the plugin page uses window.opener to verify postMessage source.
   tab_reference = window.open(PLUGIN_URL, '_blank');
 
   setTimeout(() => {
-    if(tab_reference){
-      sendDataToPlugin();
+    if (tab_reference) {
+      sendDataToPluginWithRetry();
     }
-  }, 1000);
+  }, 500);
 }
 
-function sendDataToPlugin(){
+function sendDataToPlugin() {
   const payload = {
     garment_image: image_url,
     url: window.location.href,
-    page_background: page_background, 
+    page_background: page_background,
+  };
+  console.log('[VRCloth plugin.js] postMessage init_plugin', payload);
+  tab_reference.postMessage(
+    {
+      type: 'init_plugin',
+      data: payload,
+    },
+    '*',
+  );
+}
+
+/** Repeat postMessage if the plugin tab booted slowly and missed the first event. */
+function sendDataToPluginWithRetry(attempt) {
+  attempt = attempt || 0;
+  sendDataToPlugin();
+  if (attempt < 3) {
+    setTimeout(function () {
+      sendDataToPluginWithRetry(attempt + 1);
+    }, 1500);
   }
-  console.log(payload);
-  tab_reference.postMessage({
-    type: 'init_plugin',
-    data: payload
-  }, '*');
 }
 
 function loadHtml2Canvas() {
