@@ -4,7 +4,7 @@
     /** Per-site URL substring + product image selector (queried on the opener page, not in the iframe). */
     const patternsData = [
       {
-        url: 'https://shricreationstudio.com/products',
+        url: 'https://shricreationstudio.com/products/',
         imageSelector: '#gallery-preview',
       },
     ];
