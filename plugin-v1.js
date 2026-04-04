@@ -9,8 +9,8 @@
       },
     ];
 
-    const iframeSrc = 'https://vrcloth.com/app/assets/html/plugin.html'//(script && script.getAttribute('data-iframe-src')) || '';
-    // const iframeSrc = 'http://localhost:4200/assets/html/plugin.html';
+    // const iframeSrc = 'https://vrcloth.com/app/assets/html/plugin.html'//(script && script.getAttribute('data-iframe-src')) || '';
+    const iframeSrc = 'http://localhost:4200/plugin';
     const btnText =
       (script && script.getAttribute('data-button-text')) || 'Open in new tab';
     const HOST_ID = 'ruffle-parent-iframe-host';
