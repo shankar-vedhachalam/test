@@ -45,7 +45,7 @@ function initPluginTab(){
     if (tab_reference) {
       sendDataToPluginWithRetry();
     }
-  }, 500);
+  }, 3500);
 }
 
 function sendDataToPlugin() {
