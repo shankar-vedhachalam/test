@@ -11,6 +11,26 @@ const PAGES = [
 ];
 const PLUGIN_URL = 'http://localhost:4200/plugin';
 // const PLUGIN_URL = 'https://vrcloth.com/app/plugin';
+const PLUGIN_ORIGIN = (function () {
+  try {
+    return new URL(PLUGIN_URL).origin;
+  } catch (e) {
+    return '';
+  }
+})();
+
+/** Confirms the plugin tab’s Angular listener ran and accepted init_plugin (see PluginEmbedHostInitBridge). */
+window.addEventListener('message', function (ev) {
+  if (!PLUGIN_ORIGIN || ev.origin !== PLUGIN_ORIGIN) {
+    return;
+  }
+  if (!ev.data || typeof ev.data !== 'object') {
+    return;
+  }
+  if (ev.data.type === 'init_plugin_ack' && ev.data.ok) {
+    console.info('[VRCloth plugin.js] plugin tab acknowledged init_plugin (listener OK)', ev.data);
+  }
+});
 
 // Variables
 let source_script;
@@ -37,15 +57,31 @@ function getTryNowButton(){
   document.body.appendChild(btn);
 }
 
+function buildPluginOpenUrl() {
+  try {
+    var u = new URL(PLUGIN_URL);
+    if (image_url) {
+      u.searchParams.set('garment_image', image_url);
+    }
+    u.searchParams.set('url', window.location.href);
+    if (page_background) {
+      u.searchParams.set('page_background', page_background);
+    }
+    return u.toString();
+  } catch (e) {
+    return PLUGIN_URL;
+  }
+}
+
 function initPluginTab(){
   // Do not pass noopener/noreferrer: the plugin page uses window.opener to verify postMessage source.
-  tab_reference = window.open(PLUGIN_URL, '_blank');
+  tab_reference = window.open(buildPluginOpenUrl(), '_blank');
 
   setTimeout(() => {
     if (tab_reference) {
       sendDataToPluginWithRetry();
     }
-  }, 3500);
+  }, 500);
 }
 
 function sendDataToPlugin() {
