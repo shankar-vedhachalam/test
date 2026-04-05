@@ -139,95 +139,95 @@ function getTryNowButton() {
   document.body.appendChild(btn);
 }
 
-// ─── Pure JS page capture — NO libraries, NO external scripts ─────────────────
-// Fully CSP-safe: uses only Canvas API + XMLSerializer + Blob (all built-in)
+// ─── Pure JS page capture — NO libraries, NO canvas taint possible ────────────
+// Strategy: inline ALL images as base64 FIRST, then build SVG blob data URL.
+// Never calls canvas.toDataURL() → SecurityError impossible.
 async function capturePagePureJS() {
   const width   = document.documentElement.scrollWidth;
   const height  = document.documentElement.scrollHeight;
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
-  const dpr     = window.devicePixelRatio || 1;
 
-  // Step 1: Convert all external images to inline base64 to avoid canvas taint
-  await inlineExternalImages();
+  // Step 1: Deep-clone body BEFORE touching live DOM
+  const bodyClone = document.body.cloneNode(true);
 
-  // Step 2: Clone body and inline all computed styles
-  const bodyClone   = document.body.cloneNode(true);
-  const liveEls     = document.body.getElementsByTagName('*');
-  const clonedEls   = bodyClone.getElementsByTagName('*');
+  // Step 2: Inline all <img> src as base64 in the CLONE (never touches live page)
+  await inlineImagesInClone(bodyClone);
 
+  // Step 3: Inline all computed styles into clone elements
+  const liveEls   = document.body.getElementsByTagName('*');
+  const cloneEls  = bodyClone.getElementsByTagName('*');
   for (let i = 0; i < liveEls.length; i++) {
-    if (!clonedEls[i]) continue;
+    if (!cloneEls[i]) continue;
     const computed = window.getComputedStyle(liveEls[i]);
     let styleStr   = '';
     for (let j = 0; j < computed.length; j++) {
       const prop = computed[j];
       styleStr  += `${prop}:${computed.getPropertyValue(prop)};`;
     }
-    clonedEls[i].setAttribute('style', styleStr);
-    // Remove script tags from clone
-    if (clonedEls[i].tagName === 'SCRIPT') clonedEls[i].remove();
+    cloneEls[i].setAttribute('style', styleStr);
+    // Strip scripts from snapshot
+    if (cloneEls[i].tagName === 'SCRIPT') cloneEls[i].remove();
   }
 
-  // Step 3: Build SVG with foreignObject wrapping the cloned HTML
+  // Step 4: Serialize clone → SVG foreignObject
   const serialized = new XMLSerializer().serializeToString(bodyClone);
-  const svgStr     = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-    <foreignObject width="100%" height="100%" x="-${scrollX}" y="-${scrollY}">
-      <div xmlns="http://www.w3.org/1999/xhtml">${serialized}</div>
-    </foreignObject>
-  </svg>`;
+  const svgStr     = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`,
+    `<foreignObject width="100%" height="100%" x="-${scrollX}" y="-${scrollY}">`,
+    `<div xmlns="http://www.w3.org/1999/xhtml">${serialized}</div>`,
+    `</foreignObject></svg>`
+  ].join('');
 
-  // Step 4: Blob URL → Image → Canvas → base64
-  return new Promise((resolve, reject) => {
-    const blob    = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl  = URL.createObjectURL(blob);
-
-    const canvas  = document.createElement('canvas');
-    canvas.width  = width  * dpr;
-    canvas.height = height * dpr;
-    const ctx     = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-
-    const img = new Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(svgUrl);
-      // Return as JPEG for smaller size (PNG can be huge for full pages)
-      resolve(canvas.toDataURL('image/jpeg', 0.85));
-    };
-    img.onerror = (e) => {
-      URL.revokeObjectURL(svgUrl);
-      reject(new Error('SVG render failed: ' + e));
-    };
-    img.src = svgUrl;
-  });
+  // Step 5: Return as SVG data URL — no Canvas, no toDataURL(), no SecurityError
+  const b64svg = btoa(unescape(encodeURIComponent(svgStr)));
+  return 'data:image/svg+xml;base64,' + b64svg;
 }
 
-// ─── Inline external images as base64 to prevent canvas taint ─────────────────
-async function inlineExternalImages() {
-  const images  = Array.from(document.querySelectorAll('img'));
-  const origin  = window.location.origin;
+// ─── Inline all <img> in a DOM clone as base64 ───────────────────────────────
+// Works on the CLONE only — never taints the live page canvas context
+async function inlineImagesInClone(rootEl) {
+  const imgs  = Array.from(rootEl.querySelectorAll('img'));
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-  const tasks = images.map(async (img) => {
-    if (!img.src || img.src.startsWith('data:')) return; // already inline
-    if (img.src.startsWith(origin))              return; // same-origin, safe
+  const tasks = imgs.map(async (img) => {
+    const src = img.getAttribute('src');
+    if (!src || src.startsWith('data:')) return; // already inline — skip
 
     try {
-      const res  = await fetch(img.src, { mode: 'cors', cache: 'force-cache' });
+      // Try CORS fetch first
+      const res  = await fetchWithTimeout(src, { mode: 'cors', cache: 'force-cache' }, 4000);
       const blob = await res.blob();
-      const b64  = await blobToBase64(blob);
-      img.src    = b64;
-    } catch (e) {
-      // Cross-origin image that blocks CORS — replace with transparent pixel
-      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+      img.src    = await blobToBase64(blob);
+    } catch (corsErr) {
+      try {
+        // Try no-cors fetch (gets opaque response — use as blob anyway)
+        const res  = await fetchWithTimeout(src, { mode: 'no-cors', cache: 'force-cache' }, 4000);
+        const blob = await res.blob();
+        if (blob.size > 0) {
+          img.src = await blobToBase64(blob);
+        } else {
+          img.src = BLANK; // opaque empty — replace with blank
+        }
+      } catch (e) {
+        img.src = BLANK; // totally unreachable — replace with blank
+      }
     }
   });
 
-  // Run all in parallel with a 3s timeout
+  // Run all in parallel, max 5s total timeout
   await Promise.race([
     Promise.allSettled(tasks),
-    new Promise(r => setTimeout(r, 3000)),
+    new Promise(r => setTimeout(r, 5000)),
   ]);
+}
+
+// ─── Fetch with timeout ───────────────────────────────────────────────────────
+function fetchWithTimeout(url, options, ms) {
+  const controller = new AbortController();
+  const timer      = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
 }
 
 // ─── Blob → base64 data URL ───────────────────────────────────────────────────
