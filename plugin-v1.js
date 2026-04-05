@@ -128,10 +128,21 @@ function loadHtml2Canvas() {
   }
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+    // Using unpkg as a secondary CDN if jsdelivr is having issues or blocked
+    s.src = 'https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js';
     s.async = true;
+    s.crossOrigin = "anonymous";
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load html2canvas'));
+    s.onerror = (e) => {
+        console.warn('[VRCloth plugin.js] Failed to load from unpkg, trying jsdelivr...');
+        const s2 = document.createElement('script');
+        s2.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+        s2.async = true;
+        s2.crossOrigin = "anonymous";
+        s2.onload = () => resolve();
+        s2.onerror = () => reject(new Error('Failed to load html2canvas from both unpkg and jsdelivr'));
+        document.body.appendChild(s2);
+    };
     document.body.appendChild(s);
   });
 }
