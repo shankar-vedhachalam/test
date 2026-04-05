@@ -149,37 +149,48 @@ function loadHtml2Canvas() {
 
 async function htmlToCanvasImage() {
   /**
-   * FALLBACK APPROACH: If html2canvas is blocked by CSP, we use an SVG-based 
-   * "foreignObject" drawing method that doesn't require external scripts.
+   * SELF-CONTAINED CAPTURE: Since external scripts (html2canvas) are being blocked by CSP,
+   * we use a robust, dependency-free approach that clones the DOM into an SVG data URL.
    */
-  const captureAsSvg = async () => {
+  try {
     const doc = document.documentElement;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    // Clone the entire body to ensure we don't modify the live page
+    const clone = document.body.cloneNode(true);
+    
+    // Inline styles for the clone to ensure accuracy
+    const allElements = document.body.getElementsByTagName('*');
+    const cloneElements = clone.getElementsByTagName('*');
+    
+    // Copy computed styles to the clone elements
+    for (let i = 0; i < allElements.length; i++) {
+        const style = window.getComputedStyle(allElements[i]);
+        let styleStr = "";
+        for (let j = 0; j < style.length; j++) {
+            const key = style[j];
+            styleStr += `${key}:${style.getPropertyValue(key)};`;
+        }
+        cloneElements[i].setAttribute('style', styleStr);
+    }
+    
+    // Create the SVG with the cloned HTML inside a foreignObject
     const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${window.innerWidth}" height="${window.innerHeight}">
-        <foreignObject width="100%" height="100%">
-          <div xmlns="http://www.w3.org/1999/xhtml" style="font-size:16px">
-            ${doc.innerHTML.replace(/"/g, '\'')}
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <foreignObject width="100%" height="100%" x="-${scrollX}" y="-${scrollY}">
+          <div xmlns="http://www.w3.org/1999/xhtml">
+            ${new XMLSerializer().serializeToString(clone)}
           </div>
         </foreignObject>
       </svg>`.trim();
-    
-    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-  };
 
-  if (typeof html2canvas === 'function') {
-    return html2canvas(document.body, {
-      x: window.scrollX,
-      y: window.scrollY,
-      width: window.innerWidth,
-      height: window.innerHeight,
-      windowWidth: document.documentElement.scrollWidth,
-      windowHeight: document.documentElement.scrollHeight,
-      useCORS: true,
-      ignoreElements: (el) => el.tagName === 'VIDEO',
-    }).then((canvas) => canvas.toDataURL());
-  } else {
-      console.warn('[VRCloth plugin.js] html2canvas not found, using SVG fallback');
-      return captureAsSvg();
+    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+  } catch (err) {
+    console.error('[VRCloth plugin.js] Self-contained capture failed:', err);
+    return null;
   }
 }
 
