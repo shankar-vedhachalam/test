@@ -53,20 +53,9 @@ function getTryNowButton(){
     'position:fixed;bottom:28px;right:28px;z-index:99997;padding:12px 18px;border-radius:10px;border:none;background:#0f172a;color:#fff;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer;box-shadow:0 4px 18px rgba(15,23,42,.35);';
   btn.addEventListener('click', async () => {
     // Inject and use html2canvas for snapshotting
-    if (typeof html2canvas === 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-      document.head.appendChild(script);
-      await new Promise(resolve => script.onload = resolve);
-    }
-    
     try {
-      const canvas = await html2canvas(document.body, {
-        useCORS: true,
-        logging: false,
-        backgroundColor: null
-      });
-      const base64Image = canvas.toDataURL('image/png');
+      await loadHtml2Canvas();
+      const base64Image = await htmlToCanvasImage();
       console.log('[VRCloth plugin.js] Snap captured base64:', base64Image);
       // Assign the snapshot to page_background so it can be passed to the plugin
       page_background = base64Image;
