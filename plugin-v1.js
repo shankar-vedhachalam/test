@@ -1,4 +1,4 @@
-// Constants
+// ─── Constants ───────────────────────────────────────────────────────────────
 const PAGES = [
   {
     url: 'https://shricreationstudio.com/products/',
@@ -9,219 +9,309 @@ const PAGES = [
     imageSelector: '#mainProductImage',
   }
 ];
-const PLUGIN_URL = 'http://localhost:4200/plugin';
+
+const PLUGIN_URL    = 'http://localhost:4200/plugin';
 // const PLUGIN_URL = 'https://vrcloth.com/app/plugin';
+
 const PLUGIN_ORIGIN = (function () {
-  try {
-    return new URL(PLUGIN_URL).origin;
-  } catch (e) {
-    return '';
-  }
+  try { return new URL(PLUGIN_URL).origin; } catch (e) { return ''; }
 })();
 
-/** Confirms the plugin tab’s Angular listener ran and accepted init_plugin (see PluginEmbedHostInitBridge). */
-window.addEventListener('message', function (ev) {
-  if (!PLUGIN_ORIGIN || ev.origin !== PLUGIN_ORIGIN) {
-    return;
-  }
-  if (!ev.data || typeof ev.data !== 'object') {
-    return;
-  }
-  if (ev.data.type === 'init_plugin_ack' && ev.data.ok) {
-    console.info('[VRCloth plugin.js] plugin tab acknowledged init_plugin (listener OK)', ev.data);
-  }
-});
-
-// Variables
+// ─── State ────────────────────────────────────────────────────────────────────
 let source_script;
 let tab_reference;
 let image_url;
 let page_background;
 
+// ─── Plugin tab ACK listener ──────────────────────────────────────────────────
+window.addEventListener('message', function (ev) {
+  if (!PLUGIN_ORIGIN || ev.origin !== PLUGIN_ORIGIN) return;
+  if (!ev.data || typeof ev.data !== 'object') return;
+  if (ev.data.type === 'init_plugin_ack' && ev.data.ok) {
+    console.info('[VRCloth plugin.js] plugin tab acknowledged init_plugin ✅', ev.data);
+  }
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function isTargetPage(url) {
-  return PAGES.filter(page => url.includes(page.url))[0];
+  return PAGES.find(page => url.includes(page.url));
 }
 
 function isTargetImagePresent(imageSelector) {
   return document.querySelector(imageSelector);
 }
 
-function getTryNowButton(){
-  let btn = document.createElement('button');
-  btn.textContent = source_script.getAttribute('data-button-text') || 'Try Now Virtually';
-  btn.style.cssText =
-    'position:fixed;bottom:28px;right:28px;z-index:99997;padding:12px 18px;border-radius:10px;border:none;background:#0f172a;color:#fff;font:600 14px system-ui,-apple-system,sans-serif;cursor:pointer;box-shadow:0 4px 18px rgba(15,23,42,.35);';
+// ─── Better product image detection ──────────────────────────────────────────
+// Falls back through multiple common selectors if the configured one fails
+function detectProductImage(configuredSelector) {
+  // 1. Try the configured selector first
+  const configured = document.querySelector(configuredSelector);
+  if (configured && configured.src) return configured;
+
+  // 2. Fallback selectors — common e-commerce patterns
+  const FALLBACK_SELECTORS = [
+    '[data-main-image]',
+    '.product__image--featured img',
+    '.product-single__photo img',
+    '.woocommerce-product-gallery__image img',
+    '.product-image-main img',
+    '#product-featured-image',
+    '.main-product-image img',
+    '[id*="main"][id*="image"] img',
+    '[id*="main"][id*="photo"] img',
+    '[class*="main-image"] img',
+    '[class*="product-image"]:not([class*="thumb"]) img',
+    'img[itemprop="image"]',
+    'img[data-zoom-image]',
+    'img[data-large_image]',
+  ];
+
+  for (const sel of FALLBACK_SELECTORS) {
+    const el = document.querySelector(sel);
+    if (el && el.src && !el.src.includes('placeholder')) return el;
+  }
+
+  // 3. Last resort — largest visible image on page (likely the product)
+  const allImgs = Array.from(document.querySelectorAll('img'))
+    .filter(img => img.src && img.naturalWidth > 100 && img.offsetParent !== null)
+    .sort((a, b) => (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight));
+
+  return allImgs[0] || null;
+}
+
+// ─── Try Now Button ───────────────────────────────────────────────────────────
+function getTryNowButton() {
+  // Remove existing if re-injected
+  const existing = document.getElementById('vc-try-now-btn');
+  if (existing) existing.remove();
+
+  const btn = document.createElement('button');
+  btn.id = 'vc-try-now-btn';
+  btn.textContent = source_script.getAttribute('data-button-text') || '✨ Try Virtually';
+  btn.style.cssText = [
+    'position:fixed',
+    'bottom:28px',
+    'right:28px',
+    'z-index:99997',
+    'padding:12px 22px',
+    'border-radius:10px',
+    'border:none',
+    'background:#0f172a',
+    'color:#fff',
+    'font:600 14px system-ui,-apple-system,sans-serif',
+    'cursor:pointer',
+    'box-shadow:0 4px 18px rgba(15,23,42,.35)',
+    'transition:transform .2s,box-shadow .2s,background .2s',
+    'letter-spacing:.2px',
+  ].join(';');
+
+  btn.addEventListener('mouseenter', () => {
+    btn.style.transform    = 'translateY(-2px)';
+    btn.style.boxShadow    = '0 8px 28px rgba(15,23,42,.45)';
+    btn.style.background   = '#1e293b';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.transform    = '';
+    btn.style.boxShadow    = '0 4px 18px rgba(15,23,42,.35)';
+    btn.style.background   = '#0f172a';
+  });
+
   btn.addEventListener('click', async () => {
-    // Inject and use html2canvas for snapshotting
+    const originalText = btn.textContent;
+    btn.textContent    = '⏳ Capturing...';
+    btn.disabled       = true;
+
     try {
-      await loadHtml2Canvas();
-      const base64Image = await htmlToCanvasImage();
-      console.log('[VRCloth plugin.js] Snap captured base64:', base64Image);
-      // Assign the snapshot to page_background so it can be passed to the plugin
-      page_background = base64Image;
+      // Pure JS capture — no external scripts, fully CSP-safe
+      page_background = await capturePagePureJS();
+      console.log('[VRCloth plugin.js] ✅ Snapshot captured');
     } catch (err) {
-      console.error('[VRCloth plugin.js] Error capturing snapshot:', err);
+      console.error('[VRCloth plugin.js] Snapshot failed:', err);
+      page_background = null; // proceed without background
     }
-    
+
+    btn.textContent = originalText;
+    btn.disabled    = false;
+
     initPluginTab();
   });
+
   document.body.appendChild(btn);
 }
 
+// ─── Pure JS page capture — NO libraries, NO external scripts ─────────────────
+// Fully CSP-safe: uses only Canvas API + XMLSerializer + Blob (all built-in)
+async function capturePagePureJS() {
+  const width   = document.documentElement.scrollWidth;
+  const height  = document.documentElement.scrollHeight;
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const dpr     = window.devicePixelRatio || 1;
+
+  // Step 1: Convert all external images to inline base64 to avoid canvas taint
+  await inlineExternalImages();
+
+  // Step 2: Clone body and inline all computed styles
+  const bodyClone   = document.body.cloneNode(true);
+  const liveEls     = document.body.getElementsByTagName('*');
+  const clonedEls   = bodyClone.getElementsByTagName('*');
+
+  for (let i = 0; i < liveEls.length; i++) {
+    if (!clonedEls[i]) continue;
+    const computed = window.getComputedStyle(liveEls[i]);
+    let styleStr   = '';
+    for (let j = 0; j < computed.length; j++) {
+      const prop = computed[j];
+      styleStr  += `${prop}:${computed.getPropertyValue(prop)};`;
+    }
+    clonedEls[i].setAttribute('style', styleStr);
+    // Remove script tags from clone
+    if (clonedEls[i].tagName === 'SCRIPT') clonedEls[i].remove();
+  }
+
+  // Step 3: Build SVG with foreignObject wrapping the cloned HTML
+  const serialized = new XMLSerializer().serializeToString(bodyClone);
+  const svgStr     = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    <foreignObject width="100%" height="100%" x="-${scrollX}" y="-${scrollY}">
+      <div xmlns="http://www.w3.org/1999/xhtml">${serialized}</div>
+    </foreignObject>
+  </svg>`;
+
+  // Step 4: Blob URL → Image → Canvas → base64
+  return new Promise((resolve, reject) => {
+    const blob    = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl  = URL.createObjectURL(blob);
+
+    const canvas  = document.createElement('canvas');
+    canvas.width  = width  * dpr;
+    canvas.height = height * dpr;
+    const ctx     = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(svgUrl);
+      // Return as JPEG for smaller size (PNG can be huge for full pages)
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = (e) => {
+      URL.revokeObjectURL(svgUrl);
+      reject(new Error('SVG render failed: ' + e));
+    };
+    img.src = svgUrl;
+  });
+}
+
+// ─── Inline external images as base64 to prevent canvas taint ─────────────────
+async function inlineExternalImages() {
+  const images  = Array.from(document.querySelectorAll('img'));
+  const origin  = window.location.origin;
+
+  const tasks = images.map(async (img) => {
+    if (!img.src || img.src.startsWith('data:')) return; // already inline
+    if (img.src.startsWith(origin))              return; // same-origin, safe
+
+    try {
+      const res  = await fetch(img.src, { mode: 'cors', cache: 'force-cache' });
+      const blob = await res.blob();
+      const b64  = await blobToBase64(blob);
+      img.src    = b64;
+    } catch (e) {
+      // Cross-origin image that blocks CORS — replace with transparent pixel
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    }
+  });
+
+  // Run all in parallel with a 3s timeout
+  await Promise.race([
+    Promise.allSettled(tasks),
+    new Promise(r => setTimeout(r, 3000)),
+  ]);
+}
+
+// ─── Blob → base64 data URL ───────────────────────────────────────────────────
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader  = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ─── Plugin tab management ────────────────────────────────────────────────────
 function buildPluginOpenUrl() {
   try {
-    var u = new URL(PLUGIN_URL);
-    if (image_url) {
-      u.searchParams.set('garment_image', image_url);
-    }
+    const u = new URL(PLUGIN_URL);
+    if (image_url)       u.searchParams.set('garment_image',   image_url);
+    if (page_background) u.searchParams.set('page_background', page_background);
     u.searchParams.set('url', window.location.href);
-    if (page_background) {
-      u.searchParams.set('page_background', page_background);
-    }
     return u.toString();
   } catch (e) {
     return PLUGIN_URL;
   }
 }
 
-function initPluginTab(){
-  // Do not pass noopener/noreferrer: the plugin page uses window.opener to verify postMessage source.
+function initPluginTab() {
+  // Do NOT pass noopener/noreferrer — plugin uses window.opener for postMessage
   tab_reference = window.open(buildPluginOpenUrl(), '_blank');
 
-  setTimeout(() => {
-    if (tab_reference) {
-      sendDataToPluginWithRetry();
-    }
-  }, 500);
-}
-
-function sendDataToPlugin() {
-  const payload = {
-    garment_image: image_url,
-    url: window.location.href,
-    page_background: page_background,
-  };
-  console.log('[VRCloth plugin.js] postMessage init_plugin', payload);
-  tab_reference.postMessage(
-    {
-      type: 'init_plugin',
-      data: payload,
-    },
-    '*',
-  );
-}
-
-/** Repeat postMessage if the plugin tab booted slowly and missed the first event. */
-function sendDataToPluginWithRetry(attempt) {
-  attempt = attempt || 0;
-  sendDataToPlugin();
-  if (attempt < 3) {
-    setTimeout(function () {
-      sendDataToPluginWithRetry(attempt + 1);
-    }, 1500);
-  }
-}
-
-function loadHtml2Canvas() {
-  if (typeof html2canvas === 'function') {
-    return Promise.resolve();
-  }
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    // Using unpkg as a secondary CDN if jsdelivr is having issues or blocked
-    s.src = 'https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js';
-    s.async = true;
-    s.crossOrigin = "anonymous";
-    s.onload = () => resolve();
-    s.onerror = (e) => {
-        console.warn('[VRCloth plugin.js] Failed to load from unpkg, trying jsdelivr...');
-        const s2 = document.createElement('script');
-        s2.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-        s2.async = true;
-        s2.crossOrigin = "anonymous";
-        s2.onload = () => resolve();
-        s2.onerror = () => reject(new Error('Failed to load html2canvas from both unpkg and jsdelivr'));
-        document.body.appendChild(s2);
-    };
-    document.body.appendChild(s);
-  });
-}
-
-async function htmlToCanvasImage() {
-  /**
-   * SELF-CONTAINED CAPTURE: Since external scripts (html2canvas) are being blocked by CSP,
-   * we use a robust, dependency-free approach that clones the DOM into an SVG data URL.
-   */
-  try {
-    const doc = document.documentElement;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-
-    // Clone the entire body to ensure we don't modify the live page
-    const clone = document.body.cloneNode(true);
-    
-    // Inline styles for the clone to ensure accuracy
-    const allElements = document.body.getElementsByTagName('*');
-    const cloneElements = clone.getElementsByTagName('*');
-    
-    // Copy computed styles to the clone elements
-    for (let i = 0; i < allElements.length; i++) {
-        const style = window.getComputedStyle(allElements[i]);
-        let styleStr = "";
-        for (let j = 0; j < style.length; j++) {
-            const key = style[j];
-            styleStr += `${key}:${style.getPropertyValue(key)};`;
-        }
-        cloneElements[i].setAttribute('style', styleStr);
-    }
-    
-    // Create the SVG with the cloned HTML inside a foreignObject
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-        <foreignObject width="100%" height="100%" x="-${scrollX}" y="-${scrollY}">
-          <div xmlns="http://www.w3.org/1999/xhtml">
-            ${new XMLSerializer().serializeToString(clone)}
-          </div>
-        </foreignObject>
-      </svg>`.trim();
-
-    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-  } catch (err) {
-    console.error('[VRCloth plugin.js] Self-contained capture failed:', err);
-    return null;
-  }
-}
-
-async function main(){
-
-  let page = isTargetPage(window.location.href);
-  //Skip if not a target page
-  if(!page){
+  if (!tab_reference) {
+    console.warn('[VRCloth plugin.js] Popup blocked. Ask user to allow popups.');
     return;
   }
 
-  let image = isTargetImagePresent(page.imageSelector);   
-  //Skip if target image is not present
-  if(!image){
+  // Retry postMessage until plugin tab acknowledges
+  setTimeout(() => sendDataToPluginWithRetry(), 600);
+}
+
+function sendDataToPlugin() {
+  if (!tab_reference || tab_reference.closed) return;
+  const payload = {
+    garment_image:   image_url,
+    url:             window.location.href,
+    page_background: page_background,
+  };
+  console.log('[VRCloth plugin.js] postMessage → init_plugin', payload);
+  tab_reference.postMessage({ type: 'init_plugin', data: payload }, '*');
+}
+
+function sendDataToPluginWithRetry(attempt) {
+  attempt = attempt || 0;
+  sendDataToPlugin();
+  if (attempt < 4) {
+    setTimeout(() => sendDataToPluginWithRetry(attempt + 1), 1500);
+  }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+async function main() {
+  // 1. Check if current page is a target page
+  const page = isTargetPage(window.location.href);
+  if (!page) return;
+
+  // 2. Detect product image (with fallbacks)
+  const image = detectProductImage(page.imageSelector);
+  if (!image) {
+    console.warn('[VRCloth plugin.js] No product image found on this page.');
     return;
   }
 
   image_url = image.src;
+  console.log('[VRCloth plugin.js] Product image detected:', image_url);
 
-  source_script = document.currentScript || document.querySelector('script[src*="plugin.js"]');
-  if(!source_script){
-    return;
-  }
+  // 3. Get source script reference
+  source_script = document.currentScript
+    || document.querySelector('script[src*="plugin.js"]');
+  if (!source_script) return;
 
-  if(!tab_reference){
+  // 4. Inject or update the Try Now button
+  if (!tab_reference) {
     getTryNowButton();
-  }else{
+  } else {
     sendDataToPlugin();
   }
-  
 }
-
 
 main();
